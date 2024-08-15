@@ -1,0 +1,3 @@
+([('file_transfer',
+   '/Users/admin/Desktop/T.Apichai/Project/FileTransferApp/dist/file_transfer',
+   'EXECUTABLE')],)
