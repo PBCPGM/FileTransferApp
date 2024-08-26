@@ -1,0 +1,5 @@
+pip install pyinstaller
+Win
+pyinstaller --noconsole --icon=logo_search_grid_1x_RmX_icon.ico --name="Transfer Files" file_transfer.py
+Mac
+pyinstaller --onefile --icon=logo_search_grid_1x_RmX_icon.ico --name="Transfer Files" file_transfer.py
