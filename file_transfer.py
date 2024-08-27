@@ -153,8 +153,6 @@ def transfer_files(destination_folder):
         return
 
     try:
-        new_folder = create_folder(destination_folder)
-        
         # ดึงรายการไฟล์ที่จะถ่ายโอน
         try:
             csv_files = subprocess.check_output([ADB_PATH, "-s", selected_device, "shell", "ls", "/sdcard/Download/*.csv"]).decode().strip().split('\n')
@@ -162,13 +160,15 @@ def transfer_files(destination_folder):
             txt_files = subprocess.check_output([ADB_PATH, "-s", selected_device, "shell", "ls", "/sdcard/Download/*.txt"]).decode().strip().split('\n')
             txt_files = [f for f in txt_files if f]
         except subprocess.CalledProcessError as e:
-            messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถดึงรายการไฟล์ได้: {str(e)}")
+            messagebox.showinfo("ไม่มีไฟล์", "ไม่พบไฟล์ .csv หรือ .txt ในโฟลเดอร์ Download ของอุปกรณ์")
             return
         
         files_to_transfer = csv_files + txt_files
+
+        new_folder = create_folder(destination_folder)
         total_files = len(files_to_transfer)
         current_file = 0
-        
+
         # ถ่ายโอนไฟล์
         for file in files_to_transfer:
             file_name = file.split('/')[-1]
@@ -192,6 +192,7 @@ def transfer_files(destination_folder):
 
     except Exception as e:
         messagebox.showerror("ข้อผิดพลาด", f"เกิดข้อผิดพลาด: {str(e)}")
+
 
 def create_folder(destination_folder):
     now = datetime.now()
