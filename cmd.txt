@@ -1,2 +1,2 @@
 pip install pyinstaller
-pyinstaller --onefile --noconsole --icon=logo_search_grid_1x_RmX_icon.ico --name="Transfer Files" --add-data="resources/adb/macos/adb:resources/adb/macos/adb" --add-data="resources/adb/windows/adb.exe:resources/adb/windows" --add-data="resources/adb/windows/AdbWinApi.dll:resources/adb/windows" --add-data="resources/adb/windows/AdbWinUsbApi.dll:resources/adb/windows" file_transfer.py
+pyinstaller --onefile --windowed --name YourAppName --icon your_icon.ico your_script.py

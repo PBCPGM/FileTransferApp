@@ -1,209 +1,187 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog, ttk
+from tkinter import filedialog, messagebox
+from tkinter import ttk
 import subprocess
 import os
 from datetime import datetime
-import threading
-import platform
 
-# ตรวจสอบระบบปฏิบัติการ
-current_platform = platform.system()
+# ตัวแปร global
+selected_path = os.path.expanduser('~/Downloads')  # กำหนด path เริ่มต้น
+device_connected = False
+root = None  # ประกาศตัวแปร global
 
-# ตั้งค่า ADB path ตามระบบปฏิบัติการ
-if current_platform == "Windows":
-    ADB_PATH = os.path.join(os.path.dirname(__file__), "resources", "adb", "windows", "adb.exe")
-elif current_platform == "Darwin":  # macOS
-    ADB_PATH = os.path.join(os.path.dirname(__file__), "resources", "adb", "macos", "adb")
-else:
-    raise Exception("ระบบปฏิบัติการไม่รองรับ")
-
-def is_file_transfer_allowed(device_id):
+def check_device_connection():
+    global device_connected, root
     try:
-        result = subprocess.check_output([ADB_PATH, "-s", device_id, "shell", "getprop", "sys.usb.config"])
-        return "mtp" in result.decode().lower()
-    except subprocess.CalledProcessError:
-        return False
+        result = subprocess.check_output(["adb", "devices"]).decode()
+        devices = result.strip().split('\n')[1:]  # เอาเฉพาะรายชื่ออุปกรณ์ที่เชื่อมต่อ
+        
+        # ตรวจสอบว่ามีอุปกรณ์ที่เชื่อมต่ออยู่
+        device_connected = any('device' in device for device in devices)
+        
+        if device_connected:
+            # ตรวจสอบว่าอุปกรณ์อนุญาตให้ถ่ายโอนไฟล์ได้หรือไม่
+            # ทำการดึงสถานะการอนุญาต
+            status_result = subprocess.check_output(["adb", "shell", "pm", "list", "packages"]).decode()
+            # ถ้าไม่พบอุปกรณ์หรือไม่มีสถานะอนุญาต
+            if "package:" not in status_result:
+                messagebox.showerror("ข้อผิดพลาด", "อุปกรณ์ไม่ได้รับอนุญาตให้ถ่ายโอนไฟล์")
+                transfer_button.config(state=tk.DISABLED)  # Disable transfer button
+            else:
+                messagebox.showinfo("ข้อมูล", "อุปกรณ์เชื่อมต่อแล้วและอนุญาตให้ถ่ายโอน")
+                transfer_button.config(state=tk.NORMAL)  # Enable transfer button
+        else:
+            messagebox.showerror("ข้อผิดพลาด", "ไม่พบอุปกรณ์")
+            transfer_button.config(state=tk.DISABLED)  # Disable transfer button
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถตรวจสอบอุปกรณ์ได้: {e}")
 
-def get_device_list():
+def select_path_on_device():
+    global selected_path
+    new_path = filedialog.askdirectory(initialdir=selected_path)
+    if new_path:
+        selected_path = new_path
+        path_label.config(text=f"เส้นทางที่เลือก: {selected_path}")
+
+def create_folder_on_device():
+    if not selected_path:
+        messagebox.showerror("ข้อผิดพลาด", "กรุณาเลือกเส้นทางก่อน")
+        return None
+    
+    # ตรวจสอบไฟล์ก่อนสร้างโฟลเดอร์
+    if not check_files_on_device():
+        messagebox.showinfo("ข้อมูล", "ไม่พบไฟล์ .csv หรือ .txt บนอุปกรณ์")
+        return None
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    device_name = get_device_name()
+    folder_name = f"{device_name}_{timestamp}"
+    full_path = os.path.join(selected_path, folder_name)
+    
     try:
-        devices = subprocess.check_output([ADB_PATH, "devices"]).decode()
-        lines = devices.strip().split('\n')[1:]
-        device_list = []
-        for line in lines:
-            if line.endswith("device"):
-                device_id = line.split()[0]
-                if is_file_transfer_allowed(device_id):
-                    device_list.append(device_id)
-        return device_list
-    except Exception as e:
-        messagebox.showerror("ข้อผิดพลาด", f"เกิดข้อผิดพลาดในการดึงอุปกรณ์: {str(e)}")
-        return []
-
-def update_device_dropdown(device_menu):
-    devices = get_device_list()
-    device_dropdown.set("----")
-    menu = device_menu['menu']
-    menu.delete(0, 'end')
-
-    if devices:
-        for device in devices:
-            menu.add_command(label=device, command=tk._setit(device_dropdown, device))
-        device_dropdown.set(devices[0])
-        ok_button.config(state=tk.NORMAL)
-    else:
-        menu.add_command(label="----", state=tk.DISABLED)
-        ok_button.config(state=tk.DISABLED)
-
-def show_main_window():
-    global root, device_dropdown, ok_button
-
-    root = tk.Tk()
-    root.title("เลือกอุปกรณ์")
-
-    device_dropdown = tk.StringVar(value="----")
-
-    frame = tk.Frame(root)
-    frame.pack(expand=True, fill=tk.BOTH, padx=20, pady=20)
-
-    tk.Label(frame, text="เลือกอุปกรณ์:").grid(row=0, column=0, padx=10, pady=10, sticky='e')
-
-    device_menu = tk.OptionMenu(frame, device_dropdown, "----")
-    device_menu.grid(row=0, column=1, columnspan=3, padx=10, pady=10, sticky='ew')
-
-    update_button = tk.Button(frame, text="อัปเดตอุปกรณ์", command=lambda: update_device_dropdown(device_menu), width=20)
-    update_button.grid(row=1, column=1, padx=10, pady=10, sticky='ew')
-
-    ok_button = tk.Button(frame, text="ตกลง", command=lambda: update_and_proceed(device_menu), width=20)
-    ok_button.grid(row=1, column=2, padx=10, pady=10, sticky='ew')
-    ok_button.config(state=tk.DISABLED)
-
-    root.mainloop()
-
-def update_and_proceed(device_menu):
-    update_device_dropdown(device_menu)
-    if device_dropdown.get() == "----":
-        messagebox.showwarning("ไม่มีอุปกรณ์", "โปรดอัปเดตอุปกรณ์และลองอีกครั้ง")
-    else:
-        root.withdraw()
-        show_transfer_window()
-
-def get_download_folder_on_device(device_id):
-    try:
-        result = subprocess.check_output([ADB_PATH, "-s", device_id, "shell", "echo", "$EXTERNAL_STORAGE/Download"])
-        download_folder = result.decode().strip()
-        return download_folder
-    except subprocess.CalledProcessError:
+        # ตรวจสอบและสร้างโฟลเดอร์ใน Windows
+        if not os.path.exists(full_path):
+            os.makedirs(full_path)
+        
+        device_folder_path = f"/storage/emulated/0/{folder_name}"  # ปรับ path ตามอุปกรณ์ของคุณ
+        subprocess.run(["adb", "shell", "mkdir", "-p", device_folder_path], check=True)
+        messagebox.showinfo("สำเร็จ", f"สร้างโฟลเดอร์แล้ว: {device_folder_path}")
+        return full_path
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถสร้างโฟลเดอร์ได้: {e}")
         return None
 
-def show_transfer_window():
-    global transfer_window, destination_folder, root, progress_label, progress_bar, percent_label
-
-    # Determine the default download folder based on the operating system
-    if current_platform == "Windows":
-        default_download_path = os.path.join(os.path.expanduser("~"), "Downloads")
-    elif current_platform == "Darwin":  # macOS
-        default_download_path = os.path.join(os.path.expanduser("~"), "Downloads")
-    else:
-        default_download_path = os.path.expanduser("~")  # Fallback to home directory for other platforms
-
-    transfer_window = tk.Toplevel()
-    transfer_window.title("ถ่ายโอนข้อมูล")
-
-    frame = tk.Frame(transfer_window)
-    frame.pack(expand=True, fill=tk.BOTH, padx=20, pady=20)
-
-    font = ("TH Sarabun", 12)
-
-    destination_folder = tk.StringVar(value=default_download_path)
-
-    label = tk.Label(frame, text="เลือกโฟลเดอร์ปลายทาง:", width=20, anchor='e', font=font)
-    label.grid(row=0, column=0, padx=10, pady=10, sticky='e')
-
-    entry = tk.Entry(frame, textvariable=destination_folder, font=font)
-    entry.grid(row=0, column=1, columnspan=2, padx=10, pady=10, sticky="ew")
-
-    browse_button = tk.Button(frame, text="เรียกดู", command=select_folder, width=12, font=font)
-    browse_button.grid(row=0, column=4, padx=10, pady=10, sticky="ew")
-
-    transfer_button = tk.Button(frame, text="ถ่ายโอนข้อมูล", command=lambda: start_transfer_thread(destination_folder.get()), width=12, font=font)
-    transfer_button.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
-
-    back_button = tk.Button(frame, text="ย้อนกลับ", command=lambda: (transfer_window.destroy(), root.deiconify()), width=12, font=font)
-    back_button.grid(row=1, column=2, padx=10, pady=10, sticky="ew")
-
-    progress_label = tk.Label(frame, text="ความก้าวหน้า:", font=font)
-    progress_label.grid(row=2, column=0, padx=10, pady=10, sticky='e')
-
-    progress_bar = ttk.Progressbar(frame, orient="horizontal", length=400, mode="determinate")
-    progress_bar.grid(row=2, column=1, columnspan=2, padx=10, pady=10, sticky='ew')
-
-    percent_label = tk.Label(frame, text="0%", font=font)
-    percent_label.grid(row=2, column=4, padx=10, pady=10, sticky='w')
-
-    transfer_window.mainloop()
-
-def start_transfer_thread(destination_folder):
-    transfer_thread = threading.Thread(target=transfer_files, args=(destination_folder,))
-    transfer_thread.start()
-
-def transfer_files(destination_folder):
-    selected_device = device_dropdown.get()
-    if not selected_device or selected_device == "----":
-        messagebox.showerror("ข้อผิดพลาด", "ไม่มีการเลือกอุปกรณ์")
-        return
-
+def check_files_on_device():
+    """ ตรวจสอบว่าอุปกรณ์มีไฟล์ .csv หรือ .txt หรือไม่ """
     try:
-        # ดึงรายการไฟล์ที่จะถ่ายโอน
-        try:
-            csv_files = subprocess.check_output([ADB_PATH, "-s", selected_device, "shell", "ls", "/sdcard/Download/*.csv"]).decode().strip().split('\n')
-            csv_files = [f for f in csv_files if f]
-            txt_files = subprocess.check_output([ADB_PATH, "-s", selected_device, "shell", "ls", "/sdcard/Download/*.txt"]).decode().strip().split('\n')
-            txt_files = [f for f in txt_files if f]
-        except subprocess.CalledProcessError as e:
-            messagebox.showinfo("ไม่มีไฟล์", "ไม่พบไฟล์ .csv หรือ .txt ในโฟลเดอร์ Download ของอุปกรณ์")
+        # ค้นหาไฟล์ .csv และ .txt บนอุปกรณ์
+        files = subprocess.check_output(["adb", "shell", "find", "/storage/emulated/0/Download", "-name", "*.csv", "-o", "-name", "*.txt"]).decode().splitlines()
+
+        if not files:
+            return False
+        
+        return True
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถตรวจสอบไฟล์ได้: {e}")
+        return False
+
+def create_folder_on_device():
+    if not selected_path:
+        messagebox.showerror("ข้อผิดพลาด", "กรุณาเลือกเส้นทางก่อน")
+        return None
+    
+    # ตรวจสอบไฟล์ก่อนสร้างโฟลเดอร์
+    if not check_files_on_device():
+        messagebox.showinfo("ข้อมูล", "ไม่พบไฟล์ .csv หรือ .txt บนอุปกรณ์")
+        return None
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    device_name = get_device_name()
+    folder_name = f"{device_name}_{timestamp}"
+    full_path = os.path.join(selected_path, folder_name)
+    
+    try:
+        # ตรวจสอบและสร้างโฟลเดอร์ใน Windows
+        if not os.path.exists(full_path):
+            os.makedirs(full_path)
+        
+        device_folder_path = f"/storage/emulated/0/{folder_name}"  # ปรับ path ตามอุปกรณ์ของคุณ
+        subprocess.run(["adb", "shell", "mkdir", "-p", device_folder_path], check=True)
+        messagebox.showinfo("สำเร็จ", f"สร้างโฟลเดอร์แล้ว: {device_folder_path}")
+        return full_path
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถสร้างโฟลเดอร์ได้: {e}")
+        return None
+
+def get_device_name():
+    try:
+        result = subprocess.check_output(["adb", "shell", "getprop", "ro.product.model"]).decode().strip()
+        return result if result else "device"
+    except subprocess.CalledProcessError:
+        return "device"
+
+def download_files_from_device(folder_path):
+    global root, progress_bar, status_label
+    if not folder_path:
+        # ไม่ต้องตรวจสอบเส้นทางอีกแล้ว
+        return
+    
+    try:
+        # ค้นหาไฟล์ .csv และ .txt บนอุปกรณ์
+        files = subprocess.check_output(["adb", "shell", "find", "/storage/emulated/0/Download", "-name", "*.csv", "-o", "-name", "*.txt"]).decode().splitlines()
+
+        if not files:
+            messagebox.showinfo("ข้อมูล", "ไม่พบไฟล์ .csv หรือ .txt")
             return
         
-        files_to_transfer = csv_files + txt_files
-
-        new_folder = create_folder(destination_folder)
-        total_files = len(files_to_transfer)
-        current_file = 0
-
-        # ถ่ายโอนไฟล์
-        for file in files_to_transfer:
-            file_name = file.split('/')[-1]
-            try:
-                subprocess.run([ADB_PATH, "-s", selected_device, "pull", file, f"{new_folder}/{file_name}"], check=True)
-            except subprocess.CalledProcessError as e:
-                messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถถ่ายโอนไฟล์ {file_name} ได้: {str(e)}")
-                continue
-            
-            current_file += 1
-            
-            # อัปเดต UI
-            progress = (current_file / total_files) * 100
-            progress_bar['value'] = progress
-            percent_label.config(text=f"{int(progress)}%")
-            transfer_window.update_idletasks()
+        total_files = len(files)
         
-        messagebox.showinfo("สำเร็จ", "การถ่ายโอนข้อมูลเสร็จสิ้น")
-        transfer_window.destroy()
-        root.deiconify()  # แสดงหน้าแรกอีกครั้ง
+        progress_bar['value'] = 0
+        progress_bar['maximum'] = total_files
+        status_label.config(text="กำลังดาวน์โหลดไฟล์...")
+        root.update_idletasks()  # อัปเดต UI
+        
+        for i, file in enumerate(files):
+            file_name = os.path.basename(file)
+            destination_path = os.path.join(folder_path, file_name)
+            subprocess.run(["adb", "pull", file, destination_path], check=True)
+            progress_bar['value'] = i + 1
+            status_label.config(text=f"ดาวน์โหลดไฟล์ {i + 1}/{total_files} เสร็จสิ้น")
+            root.update_idletasks()  # อัปเดต UI
+        
+        messagebox.showinfo("สำเร็จ", "ดาวน์โหลดไฟล์เสร็จสิ้น")
+        status_label.config(text="ดาวน์โหลดเสร็จสิ้น")
+    except subprocess.CalledProcessError as e:
+        messagebox.showerror("ข้อผิดพลาด", f"ไม่สามารถดาวน์โหลดไฟล์ได้: {e}")
 
-    except Exception as e:
-        messagebox.showerror("ข้อผิดพลาด", f"เกิดข้อผิดพลาด: {str(e)}")
+def create_ui():
+    global path_label, transfer_button, progress_bar, status_label, root
+    
+    root = tk.Tk()
+    root.title("จัดการไฟล์ ADB")
+    
+    # ปุ่ม "Update"
+    tk.Button(root, text="ตรวจสอบการเชื่อมต่ออุปกรณ์", command=check_device_connection).pack(pady=10)
+    
+    # ปุ่ม "เลือกเส้นทาง"
+    tk.Label(root, text="เลือกเส้นทางบนเครื่อง:").pack(pady=10)
+    tk.Button(root, text="เลือกเส้นทาง", command=select_path_on_device).pack(pady=5)
+    
+    path_label = tk.Label(root, text=f"เส้นทางที่เลือก: {selected_path}")
+    path_label.pack(pady=10)
+    
+    # ปุ่ม "ย้ายไฟล์"
+    transfer_button = tk.Button(root, text="สร้างโฟลเดอร์และย้ายไฟล์", command=lambda: download_files_from_device(create_folder_on_device()), state=tk.DISABLED)
+    transfer_button.pack(pady=20)
+    
+    # Progress Bar และ Status Label
+    progress_bar = ttk.Progressbar(root, orient="horizontal", length=400, mode="determinate")
+    progress_bar.pack(pady=10)
+    
+    status_label = tk.Label(root, text="")
+    status_label.pack(pady=5)
+    
+    root.mainloop()
 
-
-def create_folder(destination_folder):
-    now = datetime.now()
-    folder_name = now.strftime("%Y-%m-%d_%H-%M-%S")
-    new_folder = os.path.join(destination_folder, folder_name)
-    os.makedirs(new_folder, exist_ok=True)
-    return new_folder
-
-def select_folder():
-    folder = filedialog.askdirectory()
-    if folder:
-        destination_folder.set(folder)
-
-show_main_window()
+if __name__ == "__main__":
+    create_ui()
