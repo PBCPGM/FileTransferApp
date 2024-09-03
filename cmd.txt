@@ -1,2 +1,5 @@
 pip install pyinstaller
+Win os
 pyinstaller --onefile --windowed --name YourAppName --icon your_icon.ico your_script.py
+Mac os
+pyinstaller --onefile --windowed --name YourAppName --icon your_icon.icns your_script.py
